@@ -93,6 +93,23 @@ def test_api_health():
 
 def test_api_records():
     """Test retrieving records by split."""
+    from src.database import insert_failure_record
+    insert_failure_record({
+        "record_id": "rec_api_test_01",
+        "mandate_id": "sub_api_test",
+        "merchant_id": "mer_nbfc_001",
+        "customer_id": "cust_api",
+        "customer_name": "API Test Customer",
+        "amount_paise": 500000,
+        "decline_reason": "INSUFFICIENT_BALANCE",
+        "decline_timestamp": datetime.now().isoformat(),
+        "prior_retry_count": 0,
+        "prior_notifications": [],
+        "mandate_start_date": "2025-01-01T00:00:00",
+        "source": "synthetic",
+        "ground_truth_reason": "INSUFFICIENT_BALANCE",
+        "ground_truth_action": "send_pre_debit_notice"
+    }, dataset_split="working")
     response = client.get("/api/records?split=working")
     assert response.status_code == 200
     data = response.json()

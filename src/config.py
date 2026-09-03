@@ -21,7 +21,7 @@ RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET", "")
 # --- Database & Storage Paths ---
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-DATABASE_PATH = str(DATA_DIR / "mandate_failures.db")
+DATABASE_PATH = os.getenv("DATABASE_PATH", str(DATA_DIR / "mandate_failures.db"))
 WORKING_SET_PATH = str(DATA_DIR / "working_set.json")
 HELD_OUT_SET_PATH = str(DATA_DIR / "held_out_set.json")
 

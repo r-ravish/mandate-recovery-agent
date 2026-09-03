@@ -1,0 +1,3 @@
+"""
+Mandate Recovery Agent package.
+"""

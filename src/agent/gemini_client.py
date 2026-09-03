@@ -238,9 +238,10 @@ def _simulated_expert_reasoning(
             is_terminal=True
         )
 
-    if decline_reason == "UNCLASSIFIED":
+    known_reasons = ["INSUFFICIENT_BALANCE", "EXECUTION_WINDOW_BLOCKED", "BANK_TECHNICAL_FAILURE", "AFA_LIMIT_EXCEEDED", "MANDATE_EXPIRED", "MANDATE_REVOKED"]
+    if decline_reason == "UNCLASSIFIED" or decline_reason not in known_reasons:
         thought = (
-            f"Mandate {mandate_id} failed with unclassified decline reason. "
+            f"Mandate {mandate_id} failed with unclassified/exotic decline reason: '{decline_reason}'. "
             f"The error does not match any recognized pattern in the 7-reason taxonomy. "
             f"Applying uncertainty handling principle: Never guess an action when the failure cause is ambiguous. "
             f"Escalating to technical operations."

@@ -23,7 +23,8 @@ from src.agent.tool_registry import dispatch_tool_call
 
 def process_mandate_failure(
     record_or_id: Union[str, dict[str, Any]],
-    max_steps: int = 5
+    max_steps: int = 5,
+    force_reprocess: bool = False
 ) -> AgentDecision:
     """
     Execute the end-to-end agent decision loop for a single mandate failure.
@@ -31,12 +32,32 @@ def process_mandate_failure(
     Parameters:
     - record_or_id: Record ID string or raw record dict
     - max_steps: Maximum turns allowed before auto-escalating (default 5)
+    - force_reprocess: If True, ignores existing decisions and forces re-evaluation
     
     Returns:
     - AgentDecision model with complete reasoning chain and outcome
     """
     # 1. Resolve record
     if isinstance(record_or_id, str):
+        # Idempotency Guard: Check if this record was already processed
+        if not force_reprocess:
+            conn = get_connection()
+            existing = conn.execute("SELECT * FROM agent_decisions WHERE record_id = ?", (record_or_id,)).fetchone()
+            conn.close()
+            if existing:
+                return AgentDecision(
+                    record_id=existing["record_id"],
+                    mandate_id=existing["mandate_id"],
+                    diagnosed_reason=DeclineReason(existing["diagnosed_reason"]) if existing["diagnosed_reason"] in [r.value for r in DeclineReason] else DeclineReason.UNCLASSIFIED,
+                    chosen_action=CorrectAction(existing["chosen_action"]),
+                    action_arguments=json.loads(existing["action_arguments"]) if existing["action_arguments"] else {},
+                    reasoning=existing["reasoning"] + "\n\n[Idempotency Guard] Existing decision re-used; duplicate processing prevented.",
+                    steps_taken=existing["steps_taken"],
+                    timestamp=existing["timestamp"],
+                    compliance_violations=json.loads(existing["compliance_violations"]) if existing["compliance_violations"] else [],
+                    success=bool(existing["success"])
+                )
+
         record_data = get_failure_record_by_id(record_or_id)
         if not record_data:
             raise ValueError(f"Mandate failure record '{record_or_id}' not found in database.")
@@ -48,6 +69,64 @@ def process_mandate_failure(
     record_id = context["record_id"]
     mandate_id = context["mandate_id"]
     decline_reason_str = context["decline_reason"]
+
+    # Data Integrity Guard: Check for corrupt / negative / zero transaction amount
+    amount_paise = context.get("amount_paise", 0)
+    if amount_paise is None or amount_paise <= 0:
+        escalate_args = {
+            "record_id": record_id,
+            "mandate_id": mandate_id,
+            "reason": f"Data integrity failure: non-positive or corrupted amount ({amount_paise} paise).",
+            "priority": "urgent",
+            "recommended_human_action": "Verify core banking / billing records for corrupted amount."
+        }
+        dispatch_tool_call("escalate_to_human", escalate_args, "Data corruption guardrail triggered", context)
+        now_iso = datetime.now().isoformat()
+        return AgentDecision(
+            record_id=record_id,
+            mandate_id=mandate_id,
+            diagnosed_reason=DeclineReason.UNCLASSIFIED,
+            chosen_action=CorrectAction.ESCALATE_TO_HUMAN,
+            action_arguments=escalate_args,
+            reasoning="[Data Integrity Guard] Transaction amount is missing or <= 0. Auto-escalated to human.",
+            steps_taken=1,
+            timestamp=now_iso,
+            compliance_violations=["Data integrity violation: amount_paise <= 0"],
+            success=True
+        )
+
+    # Race Condition Guard: Check if an active retry is ALREADY scheduled in the future for this mandate
+    conn = get_connection()
+    recent_retry = conn.execute("""
+        SELECT * FROM audit_log 
+        WHERE mandate_id = ? AND tool_name = 'schedule_retry' AND compliance_check_passed = 1
+        ORDER BY log_id DESC LIMIT 1
+    """, (mandate_id,)).fetchone()
+    conn.close()
+
+    if recent_retry:
+        retry_res = json.loads(recent_retry["result"]) if isinstance(recent_retry["result"], str) else recent_retry["result"]
+        scheduled_time_str = retry_res.get("scheduled_retry_time")
+        if scheduled_time_str:
+            try:
+                from src.guardrails.compliance_checker import parse_iso_datetime
+                sched_dt = parse_iso_datetime(scheduled_time_str)
+                if sched_dt > datetime.now():
+                    now_iso = datetime.now().isoformat()
+                    return AgentDecision(
+                        record_id=record_id,
+                        mandate_id=mandate_id,
+                        diagnosed_reason=DeclineReason(decline_reason_str) if decline_reason_str in [r.value for r in DeclineReason] else DeclineReason.UNCLASSIFIED,
+                        chosen_action=CorrectAction.SCHEDULE_RETRY,
+                        action_arguments={"scheduled_retry_time": scheduled_time_str, "status": "existing_active_retry"},
+                        reasoning=f"[Race Condition Guard] Mandate {mandate_id} already has an active debit retry scheduled for {scheduled_time_str}. Duplicate debit scheduling suppressed.",
+                        steps_taken=1,
+                        timestamp=now_iso,
+                        compliance_violations=[],
+                        success=True
+                    )
+            except Exception:
+                pass
 
     # Normalize diagnosed decline reason
     try:

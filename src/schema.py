@@ -70,6 +70,10 @@ class AgentDecision(BaseModel):
     mandate_id: str
     diagnosed_reason: DeclineReason
     chosen_action: CorrectAction
+    first_action_taken: Optional[CorrectAction] = Field(
+        default=None,
+        description="The first tool the agent invoked (used for evaluation against ground-truth labels)"
+    )
     action_arguments: dict[str, Any] = Field(default_factory=dict)
     reasoning: str = Field(description="Agent's natural language chain of thought / rationale")
     steps_taken: int = Field(default=1, ge=1)

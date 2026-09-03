@@ -72,15 +72,17 @@ def determine_ground_truth_action(
         return CorrectAction.ESCALATE_TO_HUMAN
 
     # 4. For recoverable failures (INSUFFICIENT_BALANCE, EXECUTION_WINDOW_BLOCKED, BANK_TECHNICAL_FAILURE):
-    # Rule 1: Check if a Pre-Debit Notification (PDN) was already sent at least 24h prior to now
+    # Rule 1: Check if a Pre-Debit Notification (PDN) was already sent at least 24h and at most 7 days
+    # prior to the decline timestamp. Matches compliance_checker.py check_pre_debit_notification().
     has_valid_recent_pdn = False
     for notif in prior_notifications:
         if notif.get("notification_type") == "pre_debit_notice":
             sent_time_str = notif.get("sent_at")
             try:
                 sent_time = datetime.fromisoformat(sent_time_str)
-                # If PDN was sent >= 24h before decline/retry time
-                if (decline_timestamp - sent_time).total_seconds() >= 24 * 3600:
+                advance_seconds = (decline_timestamp - sent_time).total_seconds()
+                # PDN must be >= 24h before decline AND within 7 days (168h)
+                if advance_seconds >= 24 * 3600 and advance_seconds <= 7 * 86400:
                     has_valid_recent_pdn = True
                     break
             except Exception:
@@ -90,7 +92,7 @@ def determine_ground_truth_action(
         # PDN is already validly in place, agent should directly schedule a compliant retry
         return CorrectAction.SCHEDULE_RETRY
     else:
-        # PDN is missing or expired, agent MUST send pre-debit notice first before scheduling retry
+        # PDN is missing, too recent, or stale (> 7 days) — agent MUST send a fresh notice first
         return CorrectAction.SEND_PRE_DEBIT_NOTICE
 
 

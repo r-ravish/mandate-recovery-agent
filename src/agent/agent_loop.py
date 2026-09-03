@@ -96,37 +96,40 @@ def process_mandate_failure(
         )
 
     # Race Condition Guard: Check if an active retry is ALREADY scheduled in the future for this mandate
-    conn = get_connection()
-    recent_retry = conn.execute("""
-        SELECT * FROM audit_log 
-        WHERE mandate_id = ? AND tool_name = 'schedule_retry' AND compliance_check_passed = 1
-        ORDER BY log_id DESC LIMIT 1
-    """, (mandate_id,)).fetchone()
-    conn.close()
+    # (Skip this guard when force_reprocess=True, e.g. during evaluation runs)
+    if not force_reprocess:
+        conn = get_connection()
+        recent_retry = conn.execute("""
+            SELECT * FROM audit_log 
+            WHERE mandate_id = ? AND tool_name = 'schedule_retry' AND compliance_check_passed = 1
+            ORDER BY log_id DESC LIMIT 1
+        """, (mandate_id,)).fetchone()
+        conn.close()
 
-    if recent_retry:
-        retry_res = json.loads(recent_retry["result"]) if isinstance(recent_retry["result"], str) else recent_retry["result"]
-        scheduled_time_str = retry_res.get("scheduled_retry_time")
-        if scheduled_time_str:
-            try:
-                from src.guardrails.compliance_checker import parse_iso_datetime
-                sched_dt = parse_iso_datetime(scheduled_time_str)
-                if sched_dt > datetime.now():
-                    now_iso = datetime.now().isoformat()
-                    return AgentDecision(
-                        record_id=record_id,
-                        mandate_id=mandate_id,
-                        diagnosed_reason=DeclineReason(decline_reason_str) if decline_reason_str in [r.value for r in DeclineReason] else DeclineReason.UNCLASSIFIED,
-                        chosen_action=CorrectAction.SCHEDULE_RETRY,
-                        action_arguments={"scheduled_retry_time": scheduled_time_str, "status": "existing_active_retry"},
-                        reasoning=f"[Race Condition Guard] Mandate {mandate_id} already has an active debit retry scheduled for {scheduled_time_str}. Duplicate debit scheduling suppressed.",
-                        steps_taken=1,
-                        timestamp=now_iso,
-                        compliance_violations=[],
-                        success=True
-                    )
-            except Exception:
-                pass
+        if recent_retry:
+            retry_res = json.loads(recent_retry["result"]) if isinstance(recent_retry["result"], str) else recent_retry["result"]
+            scheduled_time_str = retry_res.get("scheduled_retry_time")
+            if scheduled_time_str:
+                try:
+                    from src.guardrails.compliance_checker import parse_iso_datetime
+                    sched_dt = parse_iso_datetime(scheduled_time_str)
+                    if sched_dt > datetime.now():
+                        now_iso = datetime.now().isoformat()
+                        return AgentDecision(
+                            record_id=record_id,
+                            mandate_id=mandate_id,
+                            diagnosed_reason=DeclineReason(decline_reason_str) if decline_reason_str in [r.value for r in DeclineReason] else DeclineReason.UNCLASSIFIED,
+                            chosen_action=CorrectAction.SCHEDULE_RETRY,
+                            first_action_taken=CorrectAction.SCHEDULE_RETRY,
+                            action_arguments={"scheduled_retry_time": scheduled_time_str, "status": "existing_active_retry"},
+                            reasoning=f"[Race Condition Guard] Mandate {mandate_id} already has an active debit retry scheduled for {scheduled_time_str}. Duplicate debit scheduling suppressed.",
+                            steps_taken=1,
+                            timestamp=now_iso,
+                            compliance_violations=[],
+                            success=True
+                        )
+                except Exception:
+                    pass
 
     # Normalize diagnosed decline reason
     try:
@@ -137,6 +140,7 @@ def process_mandate_failure(
     turn_history: list[dict[str, Any]] = []
     reasoning_traces: list[str] = []
     final_action: Optional[CorrectAction] = None
+    first_action_taken: Optional[CorrectAction] = None
     final_arguments: dict[str, Any] = {}
     accumulated_violations: list[str] = []
     steps_taken = 0
@@ -196,9 +200,14 @@ def process_mandate_failure(
 
         # Valid action executed!
         try:
-            final_action = CorrectAction(tool_name)
+            executed_action = CorrectAction(tool_name)
         except ValueError:
-            final_action = CorrectAction.ESCALATE_TO_HUMAN
+            executed_action = CorrectAction.ESCALATE_TO_HUMAN
+
+        # Track the very first action the agent took (used for evaluation)
+        if first_action_taken is None:
+            first_action_taken = executed_action
+        final_action = executed_action
 
         final_arguments = tool_args
         turn_history.append({
@@ -238,6 +247,7 @@ def process_mandate_failure(
         mandate_id=mandate_id,
         diagnosed_reason=diagnosed_reason,
         chosen_action=final_action,
+        first_action_taken=first_action_taken or final_action,
         action_arguments=final_arguments,
         reasoning=full_reasoning,
         steps_taken=steps_taken,

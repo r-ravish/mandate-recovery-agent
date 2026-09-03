@@ -6,4 +6,6 @@ __pycache__/
 .venv/
 data/*.json
 .DS_Store
-
+tests/
+conftest.py
+.pytest_cache/

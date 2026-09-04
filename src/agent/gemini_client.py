@@ -1,16 +1,16 @@
 """
-Google Gemini API Client for Mandate Recovery Agent.
-Manages communication with Gemini 2.0 Flash using the google-genai SDK.
+Groq API Client for Mandate Recovery Agent.
+Uses Groq's OpenAI-compatible Chat Completions API (base: https://api.groq.com/openai/v1).
 Supports both:
-1. Live Google Gemini API (when GEMINI_API_KEY is configured)
-2. Deterministic domain-expert reasoning engine fallback (offline / demo fallback)
+1. Live Groq inference (when GROQ_API_KEY is configured in .env)
+2. Deterministic domain-expert reasoning engine fallback (offline / demo mode)
 """
 import os
 import json
 from datetime import datetime, timedelta
 from typing import Optional, Any
 from dataclasses import dataclass
-from src.config import GEMINI_API_KEY
+from src.config import GROQ_API_KEY
 from src.agent.system_prompt import SYSTEM_PROMPT
 
 
@@ -23,105 +23,127 @@ class AgentTurnResponse:
     is_terminal: bool = False
 
 
-# Tool schemas for Gemini Function Calling
-GEMINI_FUNCTION_DECLARATIONS = [
+# Tool schemas in OpenAI-style function-calling format
+# (Groq's API is OpenAI-compatible and uses identical schema structure)
+OPENAI_TOOLS = [
     {
-        "name": "schedule_retry",
-        "description": "Schedule a compliant mandate retry. Requires a Pre-Debit Notification (PDN) sent >= 24h prior.",
-        "parameters": {
-            "type": "OBJECT",
-            "properties": {
-                "record_id": {"type": "STRING", "description": "Failure record ID"},
-                "mandate_id": {"type": "STRING", "description": "Mandate ID"},
-                "requested_retry_time": {"type": "STRING", "description": "ISO timestamp of requested retry"},
-                "reason_for_retry": {"type": "STRING", "description": "Reasoning for retry timing"}
-            },
-            "required": ["record_id", "mandate_id", "requested_retry_time"]
+        "type": "function",
+        "function": {
+            "name": "schedule_retry",
+            "description": "Schedule a compliant mandate retry. Requires a Pre-Debit Notification (PDN) sent >= 24h prior.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "record_id": {"type": "string", "description": "Failure record ID"},
+                    "mandate_id": {"type": "string", "description": "Mandate ID"},
+                    "requested_retry_time": {"type": "string", "description": "ISO timestamp of requested retry"},
+                    "reason_for_retry": {"type": "string", "description": "Reasoning for retry timing"}
+                },
+                "required": ["record_id", "mandate_id", "requested_retry_time"]
+            }
         }
     },
     {
-        "name": "send_pre_debit_notice",
-        "description": "Send the mandatory 24-hour advance Pre-Debit Notification (PDN) before any retry.",
-        "parameters": {
-            "type": "OBJECT",
-            "properties": {
-                "record_id": {"type": "STRING", "description": "Failure record ID"},
-                "mandate_id": {"type": "STRING", "description": "Mandate ID"},
-                "customer_id": {"type": "STRING", "description": "Customer ID"},
-                "customer_name": {"type": "STRING", "description": "Customer display name"},
-                "amount_paise": {"type": "INTEGER", "description": "Amount in paise"},
-                "planned_debit_time": {"type": "STRING", "description": "Planned retry ISO timestamp"},
-                "channel": {"type": "STRING", "description": "mock_sms, mock_whatsapp, mock_email"}
-            },
-            "required": ["record_id", "mandate_id", "customer_id", "customer_name", "amount_paise", "planned_debit_time"]
+        "type": "function",
+        "function": {
+            "name": "send_pre_debit_notice",
+            "description": "Send the mandatory 24-hour advance Pre-Debit Notification (PDN) before any retry.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "record_id": {"type": "string", "description": "Failure record ID"},
+                    "mandate_id": {"type": "string", "description": "Mandate ID"},
+                    "customer_id": {"type": "string", "description": "Customer ID"},
+                    "customer_name": {"type": "string", "description": "Customer display name"},
+                    "amount_paise": {"type": "integer", "description": "Amount in paise"},
+                    "planned_debit_time": {"type": "string", "description": "Planned retry ISO timestamp"},
+                    "channel": {"type": "string", "description": "mock_sms, mock_whatsapp, mock_email"}
+                },
+                "required": ["record_id", "mandate_id", "customer_id", "customer_name", "amount_paise", "planned_debit_time"]
+            }
         }
     },
     {
-        "name": "send_recovery_nudge",
-        "description": "Send a courteous payment reminder nudge to the customer (max 2 per cycle).",
-        "parameters": {
-            "type": "OBJECT",
-            "properties": {
-                "record_id": {"type": "STRING", "description": "Failure record ID"},
-                "mandate_id": {"type": "STRING", "description": "Mandate ID"},
-                "customer_id": {"type": "STRING", "description": "Customer ID"},
-                "customer_name": {"type": "STRING", "description": "Customer display name"},
-                "amount_paise": {"type": "INTEGER", "description": "Amount in paise"},
-                "channel": {"type": "STRING", "description": "mock_whatsapp, mock_sms"}
-            },
-            "required": ["record_id", "mandate_id", "customer_id", "customer_name", "amount_paise"]
+        "type": "function",
+        "function": {
+            "name": "send_recovery_nudge",
+            "description": "Send a courteous payment reminder nudge to the customer (max 2 per cycle).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "record_id": {"type": "string", "description": "Failure record ID"},
+                    "mandate_id": {"type": "string", "description": "Mandate ID"},
+                    "customer_id": {"type": "string", "description": "Customer ID"},
+                    "customer_name": {"type": "string", "description": "Customer display name"},
+                    "amount_paise": {"type": "integer", "description": "Amount in paise"},
+                    "channel": {"type": "string", "description": "mock_whatsapp, mock_sms"}
+                },
+                "required": ["record_id", "mandate_id", "customer_id", "customer_name", "amount_paise"]
+            }
         }
     },
     {
-        "name": "log_promise_to_pay",
-        "description": "Record that a customer pledged to fund their account by a specific date.",
-        "parameters": {
-            "type": "OBJECT",
-            "properties": {
-                "record_id": {"type": "STRING", "description": "Failure record ID"},
-                "mandate_id": {"type": "STRING", "description": "Mandate ID"},
-                "customer_id": {"type": "STRING", "description": "Customer ID"},
-                "promised_date": {"type": "STRING", "description": "YYYY-MM-DD format date"},
-                "notes": {"type": "STRING", "description": "Context notes"}
-            },
-            "required": ["record_id", "mandate_id", "customer_id", "promised_date"]
+        "type": "function",
+        "function": {
+            "name": "log_promise_to_pay",
+            "description": "Record that a customer pledged to fund their account by a specific date.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "record_id": {"type": "string", "description": "Failure record ID"},
+                    "mandate_id": {"type": "string", "description": "Mandate ID"},
+                    "customer_id": {"type": "string", "description": "Customer ID"},
+                    "promised_date": {"type": "string", "description": "YYYY-MM-DD format date"},
+                    "notes": {"type": "string", "description": "Context notes"}
+                },
+                "required": ["record_id", "mandate_id", "customer_id", "promised_date"]
+            }
         }
     },
     {
-        "name": "escalate_to_human",
-        "description": "Transfer non-recoverable, ambiguous, or ceiling-exceeded cases to a human operations specialist.",
-        "parameters": {
-            "type": "OBJECT",
-            "properties": {
-                "record_id": {"type": "STRING", "description": "Failure record ID"},
-                "mandate_id": {"type": "STRING", "description": "Mandate ID"},
-                "reason": {"type": "STRING", "description": "Why automated recovery cannot resolve this"},
-                "priority": {"type": "STRING", "description": "low, medium, high, urgent"},
-                "recommended_human_action": {"type": "STRING", "description": "Proposed action for human operator"}
-            },
-            "required": ["record_id", "mandate_id", "reason"]
+        "type": "function",
+        "function": {
+            "name": "escalate_to_human",
+            "description": "Transfer non-recoverable, ambiguous, or ceiling-exceeded cases to a human operations specialist.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "record_id": {"type": "string", "description": "Failure record ID"},
+                    "mandate_id": {"type": "string", "description": "Mandate ID"},
+                    "reason": {"type": "string", "description": "Why automated recovery cannot resolve this"},
+                    "priority": {"type": "string", "description": "low, medium, high, urgent"},
+                    "recommended_human_action": {"type": "string", "description": "Proposed action for human operator"}
+                },
+                "required": ["record_id", "mandate_id", "reason"]
+            }
         }
     },
     {
-        "name": "get_mandate_history",
-        "description": "Retrieve prior history, retries, and validity for a mandate.",
-        "parameters": {
-            "type": "OBJECT",
-            "properties": {
-                "mandate_id": {"type": "STRING", "description": "Mandate ID"}
-            },
-            "required": ["mandate_id"]
+        "type": "function",
+        "function": {
+            "name": "get_mandate_history",
+            "description": "Retrieve prior history, retries, and validity for a mandate.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mandate_id": {"type": "string", "description": "Mandate ID"}
+                },
+                "required": ["mandate_id"]
+            }
         }
     },
     {
-        "name": "get_notification_history",
-        "description": "Retrieve prior customer notifications and pre-debit notices.",
-        "parameters": {
-            "type": "OBJECT",
-            "properties": {
-                "mandate_id": {"type": "STRING", "description": "Mandate ID"}
-            },
-            "required": ["mandate_id"]
+        "type": "function",
+        "function": {
+            "name": "get_notification_history",
+            "description": "Retrieve prior customer notifications and pre-debit notices.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mandate_id": {"type": "string", "description": "Mandate ID"}
+                },
+                "required": ["mandate_id"]
+            }
         }
     }
 ]
@@ -347,67 +369,162 @@ def _simulated_expert_reasoning(
     )
 
 
+# Auth errors, schema errors, and model-not-found that should NEVER be silently swallowed.
+# These indicate integration misconfiguration and must surface immediately.
+_HARD_FAIL_PATTERNS = (
+    "invalid api key",
+    "authentication",
+    "unauthorized",
+    "403",
+    "401",
+    "invalid_api_key",
+    "not allowed by policy",    # sandbox / firewall block
+    "permissiondenied",         # openai SDK PermissionDeniedError class name
+    "model_not_found",          # wrong model name — fix config, don't fall back silently
+    "does not exist or you do not have access",
+    "model_decommissioned",     # model retired — fix the model name, don't fall back silently
+)
+
+
 def call_gemini_turn(
     context: dict[str, Any],
     turn_history: list[dict[str, Any]],
     api_key: Optional[str] = None
 ) -> AgentTurnResponse:
     """
-    Executes an agent reasoning turn.
-    Attempts live call to Google Gemini 2.0 Flash if API key is active.
-    Falls back gracefully to the deterministic expert engine if key is absent or quota is limited.
+    Executes one agent reasoning turn via Groq's OpenAI-compatible Chat Completions API.
+
+    Behavior:
+    - No key configured  →  deterministic fallback rules engine (offline / demo mode).
+    - Key configured, Groq call succeeds  →  returns Groq model response with tool call.
+    - Key configured, auth / schema error  →  raises immediately so misconfiguration is visible.
+    - Key configured, transient runtime error  →  falls back to rules engine with a notice prefix.
     """
-    effective_key = api_key or GEMINI_API_KEY
-    is_valid_key = bool(effective_key and not effective_key.startswith("your_") and len(effective_key) > 15)
+    effective_key = api_key or GROQ_API_KEY
+    is_valid_key = bool(
+        effective_key
+        and not effective_key.startswith("your_")
+        and not effective_key.startswith("gsk_placeholder")
+        and len(effective_key) > 15
+    )
 
     if not is_valid_key:
+        # No key — purely offline, run the deterministic rules engine silently.
         return _simulated_expert_reasoning(context, turn_history)
 
+    # MODEL: openai/gpt-oss-120b via Groq's OpenAI-compatible endpoint.
+    # Selected over groq/compound-beta (250 RPD) for 4x higher rate limit (1000 RPD),
+    # lower latency (~0.9s vs ~5s), and native OpenAI tools= function-calling support.
+    # This model is an open-weights GPT-class model served on Groq LPU hardware.
+    GROQ_MODEL = "openai/gpt-oss-120b"
+
+    # Build a concise tool manifest to fall back to in the system prompt
+    # (used alongside native tools= for maximum compatibility).
+    tool_manifest = "\n".join(
+        f"- {t['function']['name']}: {t['function']['description']}"
+        for t in OPENAI_TOOLS
+    )
+
+    tool_system_prompt = (
+        SYSTEM_PROMPT
+        + "\n\n## Available Tools\n"
+        + tool_manifest
+        + "\n\n## Response Format\n"
+        "You MUST respond with ONLY a valid JSON object and nothing else. No prose, no markdown fences.\n"
+        "Format:\n"
+        '{"reasoning": "<your chain-of-thought>", '
+        '"tool": "<exact tool name from the list above>", '
+        '"args": {<tool arguments as a JSON object>}}\n'
+        "If the case requires no action or is terminal, set tool to \"escalate_to_human\"."
+    )
+
+    # Build messages
+    messages = [
+        {"role": "system", "content": tool_system_prompt},
+        {"role": "user", "content": json.dumps(context, indent=2)}
+    ]
+
+    for turn in turn_history:
+        if "thought" in turn:
+            messages.append({"role": "assistant", "content": turn["thought"]})
+        if "tool_result" in turn:
+            messages.append({
+                "role": "user",
+                "content": f"Tool Execution Output:\n{json.dumps(turn['tool_result'])}"
+            })
+        if "note" in turn:
+            messages.append({
+                "role": "user",
+                "content": turn["note"]
+            })
+
+    # Ensure final message is always from 'user' role
+    if messages and messages[-1]["role"] != "user":
+        messages.append({
+            "role": "user",
+            "content": "Please proceed with selecting an appropriate compliant tool action."
+        })
+
     try:
-        from google import genai
-        from google.genai import types
+        import openai
 
-        client = genai.Client(api_key=effective_key)
-
-        # Prepare messages
-        messages = [
-            {"role": "user", "parts": [{"text": SYSTEM_PROMPT + "\n\n" + json.dumps(context, indent=2)}]}
-        ]
-
-        # Add history
-        for turn in turn_history:
-            if "thought" in turn:
-                messages.append({"role": "model", "parts": [{"text": turn["thought"]}]})
-            if "tool_result" in turn:
-                messages.append({"role": "user", "parts": [{"text": f"Tool Execution Output:\n{json.dumps(turn['tool_result'])}"}]})
-
-        # Generate with tools
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=messages,
-            config=types.GenerateContentConfig(
-                temperature=0.1
-            )
+        client = openai.OpenAI(
+            api_key=effective_key,
+            base_url="https://api.groq.com/openai/v1",
+            timeout=15.0,
+            max_retries=2
         )
 
-        thought = response.text or "Analyzing incident..."
-        tool_name = None
-        tool_args = None
+        response = client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=messages,
+            temperature=0.1,
+            max_tokens=1024,
+        )
 
-        if response.function_calls:
-            call = response.function_calls[0]
-            tool_name = call.name
-            tool_args = dict(call.args) if call.args else {}
+        raw = (response.choices[0].message.content or "").strip()
+
+        # Strip markdown fences if the model added them despite instructions
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+
+        try:
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            # Model produced non-JSON — extract what we can or escalate
+            raise ValueError(f"Model returned non-JSON response: {raw[:200]}")
+
+        thought   = parsed.get("reasoning", raw)
+        tool_name = parsed.get("tool", None)
+        tool_args = parsed.get("args", {})
+
+        # Validate tool name is in registered set
+        valid_tools = {t["function"]["name"] for t in OPENAI_TOOLS}
+        if tool_name and tool_name not in valid_tools:
+            raise ValueError(f"Model returned unknown tool name: {tool_name!r}")
 
         return AgentTurnResponse(
             thought=thought,
             tool_name=tool_name,
-            tool_args=tool_args,
+            tool_args=tool_args if isinstance(tool_args, dict) else {},
             is_terminal=(tool_name in ["schedule_retry", "escalate_to_human"])
         )
 
     except Exception as e:
-        # Gracefully handle API rate limits or connection hiccups
+        err_lower = (str(e) + " " + type(e).__name__).lower()
+
+        # Hard-fail immediately on auth / schema / policy errors — do NOT silently swallow.
+        # These reveal integration misconfiguration and must be visible on first test.
+        if any(pat in err_lower for pat in _HARD_FAIL_PATTERNS):
+            raise RuntimeError(
+                f"[Groq Integration Error — fix before proceeding] {type(e).__name__}: {e}"
+            ) from e
+
+        # Transient errors (network blip, timeout, rate limit, bad JSON) → fall back to rules engine
+        # with a clearly labelled notice so traces remain inspectable.
         fallback = _simulated_expert_reasoning(context, turn_history)
-        fallback.thought = f"[Gemini Notice: {e}] {fallback.thought}"
+        fallback.thought = f"[Groq transient error: {e}] {fallback.thought}"
         return fallback

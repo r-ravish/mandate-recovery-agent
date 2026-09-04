@@ -21,18 +21,27 @@ from src.database import get_notifications_for_mandate, get_connection
 
 
 def parse_iso_datetime(dt_str: str) -> datetime:
-    """Parse ISO string to datetime, handling both 'Z' and offset notations."""
+    """Parse ISO string to datetime, normalizing to offset-naive UTC for consistent comparisons."""
+    from datetime import timezone
     clean_str = dt_str.replace("Z", "+00:00") if dt_str.endswith("Z") else dt_str
+    dt = None
     try:
-        return datetime.fromisoformat(clean_str)
+        dt = datetime.fromisoformat(clean_str)
     except ValueError:
         # Fallback for common date formats
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
             try:
-                return datetime.strptime(clean_str, fmt)
+                dt = datetime.strptime(clean_str, fmt)
+                break
             except ValueError:
                 continue
+    if dt is None:
         raise ValueError(f"Unable to parse datetime string: {dt_str}")
+
+    # Strip tzinfo after converting to UTC so all comparisons in the system are naive-safe
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
 
 
 def is_within_blocked_window(dt: datetime) -> bool:

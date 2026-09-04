@@ -240,3 +240,100 @@ def get_audit_logs_for_record(record_id: str) -> list[dict[str, Any]]:
         d["compliance_violations"] = json.loads(d["compliance_violations"])
         results.append(d)
     return results
+
+
+def get_agent_decision(record_id: str) -> Optional[dict[str, Any]]:
+    """Retrieve agent decision for a given record_id."""
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM agent_decisions WHERE record_id = ?", (record_id,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+    d = dict(row)
+    d["action_arguments"] = json.loads(d["action_arguments"]) if d["action_arguments"] else {}
+    d["compliance_violations"] = json.loads(d["compliance_violations"]) if d["compliance_violations"] else []
+    return d
+
+
+def get_all_agent_decisions() -> list[dict[str, Any]]:
+    """Retrieve all agent decisions ordered by latest timestamp."""
+    conn = get_connection()
+    rows = conn.execute("SELECT * FROM agent_decisions ORDER BY timestamp DESC").fetchall()
+    conn.close()
+    results = []
+    for r in rows:
+        d = dict(r)
+        d["action_arguments"] = json.loads(d["action_arguments"]) if d["action_arguments"] else {}
+        d["compliance_violations"] = json.loads(d["compliance_violations"]) if d["compliance_violations"] else []
+        results.append(d)
+    return results
+
+
+def get_all_audit_logs(limit: int = 300) -> list[dict[str, Any]]:
+    """Retrieve recent audit logs across all records."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM audit_log ORDER BY log_id DESC LIMIT ?",
+        (limit,)
+    ).fetchall()
+    conn.close()
+    results = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["tool_arguments"] = json.loads(d["tool_arguments"])
+        except Exception:
+            pass
+        try:
+            d["result"] = json.loads(d["result"])
+        except Exception:
+            pass
+        try:
+            d["compliance_violations"] = json.loads(d["compliance_violations"])
+        except Exception:
+            pass
+        results.append(d)
+    return results
+
+
+def get_dashboard_kpis() -> dict[str, Any]:
+    """Calculate high-level KPI metrics for the executive dashboard."""
+    conn = get_connection()
+    total_failures = conn.execute("SELECT COUNT(*) FROM mandate_failures").fetchone()[0]
+    total_at_risk_paise = conn.execute("SELECT COALESCE(SUM(amount_paise), 0) FROM mandate_failures").fetchone()[0]
+
+    # Decisions metrics
+    total_decisions = conn.execute("SELECT COUNT(*) FROM agent_decisions").fetchone()[0]
+    escalations = conn.execute("SELECT COUNT(*) FROM agent_decisions WHERE chosen_action = 'escalate_to_human'").fetchone()[0]
+    
+    # Recovered amount = amount of records where chosen_action was schedule_retry or log_promise_to_pay with success = 1
+    recovered_paise = conn.execute("""
+        SELECT COALESCE(SUM(f.amount_paise), 0)
+        FROM mandate_failures f
+        JOIN agent_decisions d ON f.record_id = d.record_id
+        WHERE d.chosen_action IN ('schedule_retry', 'log_promise_to_pay')
+          AND d.success = 1
+    """).fetchone()[0]
+
+    # Audit compliance stats
+    audit_total = conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
+    audit_passed = conn.execute("SELECT COUNT(*) FROM audit_log WHERE compliance_check_passed = 1").fetchone()[0]
+    audit_blocked = conn.execute("SELECT COUNT(*) FROM audit_log WHERE compliance_check_passed = 0").fetchone()[0]
+    conn.close()
+
+    adherence_pct = (audit_passed / audit_total * 100) if audit_total > 0 else 100.0
+    recovery_rate_pct = (recovered_paise / total_at_risk_paise * 100) if total_at_risk_paise > 0 else 0.0
+
+    return {
+        "total_failures": total_failures,
+        "total_at_risk_inr": total_at_risk_paise / 100.0,
+        "total_recovered_inr": recovered_paise / 100.0,
+        "recovery_rate_pct": recovery_rate_pct,
+        "total_decisions": total_decisions,
+        "escalations": escalations,
+        "audit_total": audit_total,
+        "audit_passed": audit_passed,
+        "audit_blocked": audit_blocked,
+        "adherence_pct": adherence_pct,
+    }
+

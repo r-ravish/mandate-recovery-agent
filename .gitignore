@@ -5,7 +5,9 @@ __pycache__/
 *.sqlite3
 .venv/
 data/*.json
+!data/dashboard_kpi_snapshot.json
 .DS_Store
 tests/
 conftest.py
 .pytest_cache/
+.streamlit/credentials.toml

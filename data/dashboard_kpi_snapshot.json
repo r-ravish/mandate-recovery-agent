@@ -1,0 +1,13 @@
+{
+  "total_failures": 219,
+  "total_at_risk_inr": 2504200.0,
+  "total_recovered_inr": 453400.0,
+  "recovery_rate_pct": 18.10558262119639,
+  "total_decisions": 85,
+  "escalations": 44,
+  "audit_total": 149,
+  "audit_passed": 90,
+  "audit_blocked": 59,
+  "adherence_pct": 60.40268456375839,
+  "snapshot_timestamp": "2026-09-04T06:39:57.397143+00:00"
+}

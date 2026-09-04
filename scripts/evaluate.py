@@ -131,7 +131,7 @@ def build_report(
 
 **Run timestamp**: {run_ts}  
 **Held-out set size**: {n} records  
-**Model / Engine**: Gemini 2.0 Flash (deterministic expert-reasoning fallback when API key absent)
+**Model / Engine**: Groq openai/gpt-oss-120b (via OpenAI-compatible API)
 
 ---
 

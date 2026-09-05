@@ -2,7 +2,7 @@
 
 **Run timestamp**: 2026-09-03 17:02:08  
 **Held-out set size**: 64 records  
-**Model / Engine**: Gemini 2.0 Flash (deterministic expert-reasoning fallback when API key absent)
+**Model / Engine**: Groq openai/gpt-oss-120b (via OpenAI-compatible API)
 
 ---
 
@@ -12,11 +12,11 @@
 |---|---|
 | **Decline Reason Accuracy** | 100.0% |
 | **Action Accuracy** | 81.2% |
-| **Compliance Adherence** (guardrail-enforced) | 60.0% |
+| **Compliance Adherence** (guardrail-enforced) | 60.4% |
 | Total Records Evaluated | 64 |
-| Total Audit Log Entries Generated | 300 |
-| Guardrail-Blocked Attempts | 120 |
-| Successful Tool Executions | 180 |
+| Total Audit Log Entries Generated | 149 |
+| Guardrail-Blocked Attempts | 59 |
+| Successful Tool Executions | 90 |
 
 ---
 
@@ -69,10 +69,10 @@
 
 | Metric | Count |
 |---|---|
-| Total tool invocations in audit log | 300 |
-| Compliant passes (`compliance_check_passed = 1`) | 180 |
-| Blocked violations (`compliance_check_passed = 0`) | 120 |
-| **Adherence Rate** | **60.0%** |
+| Total tool invocations in audit log | 149 |
+| Compliant passes (`compliance_check_passed = 1`) | 90 |
+| Blocked violations (`compliance_check_passed = 0`) | 59 |
+| **Adherence Rate** | **60.4%** |
 
 > All blocked invocations were logged to the immutable `audit_log` table with `compliance_check_passed = 0`  
 > and a full violation description. Zero blocked invocations passed through as silent failures.

@@ -154,7 +154,7 @@ def _simulated_expert_reasoning(
     turn_history: list[dict[str, Any]]
 ) -> AgentTurnResponse:
     """
-    Deterministic domain-expert reasoning engine matching Gemini 2.0 Flash behavior.
+    Deterministic domain-expert reasoning engine matching Groq openai/gpt-oss-120b behavior.
     Evaluates failure conditions against system prompt guidelines.
     """
     record_id = context["record_id"]

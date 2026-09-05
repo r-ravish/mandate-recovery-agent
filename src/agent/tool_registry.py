@@ -1,6 +1,6 @@
 """
 Tool Registry for Mandate Recovery Agent.
-Declares callable tools and schemas for Google Gemini function calling.
+Declares callable tools and schemas for Groq / OpenAI-compatible function calling.
 Routes all 5 action tools through the compliance audit logger.
 """
 from typing import Any, Callable

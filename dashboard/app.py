@@ -61,30 +61,109 @@ html, body, [class*="css"], .stApp {
     color: #0F172A !important;
 }
 
-/* Eliminate blank space at top of page and sidebar */
-header[data-testid="stHeader"] {
+/* 1. Header & Sidebar Toggle Button */
+header[data-testid="stHeader"],
+.stAppHeader {
+    background: transparent !important;
+    height: 0px !important;
+    min-height: 0px !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    pointer-events: none !important;
+    z-index: 99999 !important;
+}
+
+/* Ensure the expand sidebar button is ALWAYS visible, clickable, and styled cleanly when sidebar is hidden */
+button[data-testid="stExpandSidebarButton"],
+[data-testid="stExpandSidebarButton"],
+[data-testid="stSidebarCollapsedControl"],
+[data-testid="collapsedControl"] {
+    display: inline-flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    position: fixed !important;
+    top: 12px !important;
+    left: 12px !important;
+    z-index: 999999 !important;
+    background: #FFFFFF !important;
+    border: 1px solid #CBD5E1 !important;
+    border-radius: 6px !important;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08) !important;
+    width: 32px !important;
+    height: 32px !important;
+    padding: 4px !important;
+    align-items: center !important;
+    justify-content: center !important;
+    cursor: pointer !important;
+    transition: all 0.15s ease !important;
+}
+
+button[data-testid="stExpandSidebarButton"]:hover,
+[data-testid="stExpandSidebarButton"]:hover {
+    background: #F1F5F9 !important;
+    border-color: #94A3B8 !important;
+}
+
+button[data-testid="stExpandSidebarButton"] svg,
+[data-testid="stExpandSidebarButton"] svg {
+    color: #0F172A !important;
+    fill: currentColor !important;
+    width: 18px !important;
+    height: 18px !important;
+}
+
+/* Hide deploy button, status widget, and main hamburger menu */
+#MainMenu, .stDeployButton, [data-testid="stStatusWidget"] {
     display: none !important;
 }
 
-section[data-testid="stSidebar"] {
+/* 2. Sidebar Styling & Collapse Button */
+section[data-testid="stSidebar"],
+.stSidebar {
     background-color: #FFFFFF !important;
     border-right: 1px solid #E2E8F0 !important;
 }
 
-section[data-testid="stSidebar"] .block-container {
-    padding-top: 1.25rem !important;
+section[data-testid="stSidebar"] .block-container,
+section[data-testid="stSidebar"] [data-testid="stMainBlockContainer"],
+div[data-testid="stSidebarContent"] {
+    padding-top: 1rem !important;
     padding-bottom: 1.5rem !important;
 }
 
-div[data-testid="stSidebarContent"] {
-    padding-top: 0 !important;
+[data-testid="stSidebarCollapseButton"] {
+    display: flex !important;
+    visibility: visible !important;
+    color: #475569 !important;
 }
 
-/* Main Container Padding */
-.main .block-container {
-    padding-top: 1.25rem !important;
+/* 3. Eliminate Blank Space at Top of Main Dashboard */
+.stMainBlockContainer,
+[data-testid="stMainBlockContainer"],
+.block-container,
+[data-testid="stMain"] .block-container,
+div[data-testid="stMain"] div.block-container,
+.stMain .block-container,
+div[data-testid="stAppViewContainer"] section.stMain .block-container,
+div[data-testid="stAppViewContainer"] section.main .block-container,
+.stApp .block-container {
+    padding-top: 1rem !important;
     padding-bottom: 2.5rem !important;
-    max-width: 1440px;
+    padding-left: 2rem !important;
+    padding-right: 2rem !important;
+    max-width: 1440px !important;
+}
+
+/* Hide empty markdown/style container wrapper at the very top */
+div[data-testid="element-container"]:has(style),
+div[data-testid="stMarkdownContainer"]:has(style),
+.element-container:has(style) {
+    display: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    height: 0 !important;
 }
 
 /* Header Banner */
@@ -92,7 +171,8 @@ div[data-testid="stSidebarContent"] {
     background: #FFFFFF;
     border: 1px solid #E2E8F0;
     border-radius: 8px;
-    padding: 16px 22px;
+    padding: 14px 20px;
+    margin-top: 0 !important;
     margin-bottom: 16px;
     display: flex;
     justify-content: space-between;
